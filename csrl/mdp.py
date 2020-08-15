@@ -163,28 +163,77 @@ class GridMDP():
 
         n_rows, n_cols = self.shape
         states, probs = [], []
+        
+        dp = None
+        if action_name==action_name_:
+            dp = 1
+        elif (action_name=='U' and action_name_=='D') or (action_name=='D' and action_name_=='U') or \
+             (action_name=='R' and action_name_=='L') or (action_name=='L' and action_name_=='R'):
+            dp = -1
+        elif action_name:
+            dp = 0
 
         # South
         if action_name!='U' and state[0]+1 < n_rows and self.structure[state[0]+1][state[1]] != 'B' and cell_type != 'U':
             states.append((state[0]+1,state[1]))
             probs.append(self.p if action_name=='D' else (1-self.p)/2)
-            probs[-1] -= (1-self.p)/2 if action_name_=='U' else 0
+            
+            if dp==1 and action_name=='D':
+                probs[-1] = 1
+            if (dp==1 and action_name!='D') or (dp==0 and action_name!='D' and action_name_!='D'):
+                probs.pop()
+                states.pop()  
+            if dp==0 and action_name=='D': 
+                probs[-1] = self.p
+            if dp==0 and action_name!='D' and action_name_=='D':
+                probs[-1] = 1-self.p
+                            
         # North
         if action_name!='D' and state[0]-1 >= 0 and self.structure[state[0]-1][state[1]] != 'B' and cell_type != 'D':
             states.append((state[0]-1,state[1]))
             probs.append(self.p if action_name=='U' else (1-self.p)/2) 
-            probs[-1] -= (1-self.p)/2 if action_name_=='D' else 0
+            
+            if dp==1 and action_name=='U':
+                probs[-1] = 1
+            if (dp==1 and action_name!='U') or (dp==0 and action_name!='U' and action_name_!='U'):
+                probs.pop()
+                states.pop()  
+            if dp==0 and action_name=='U': 
+                probs[-1] = self.p
+            if dp==0 and action_name!='U' and action_name_=='U':
+                probs[-1] = 1-self.p
+                
         # West
         if action_name!='R' and state[1]-1 >= 0 and self.structure[state[0]][state[1]-1] != 'B' and cell_type != 'R':
             states.append((state[0],state[1]-1))
             probs.append(self.p if action_name=='L' else (1-self.p)/2)
-            probs[-1] -= (1-self.p)/2 if action_name_=='R' else 0
+            
+            if dp==1 and action_name=='L':
+                probs[-1] = 1
+            if (dp==1 and action_name!='L') or (dp==0 and action_name!='L' and action_name_!='L'):
+                probs.pop()
+                states.pop()  
+            if dp==0 and action_name=='L': 
+                probs[-1] = self.p
+            if dp==0 and action_name!='L' and action_name_=='L':
+                probs[-1] = 1-self.p
+        
         # East
         if action_name!='L' and state[1]+1 < n_cols and self.structure[state[0]][state[1]+1] != 'B' and cell_type != 'L':
             states.append((state[0],state[1]+1))
             probs.append(self.p if action_name=='R' else (1-self.p)/2)
             probs[-1] -= (1-self.p)/2 if action_name_=='L' else 0
-
+            
+            if dp==1 and action_name=='R':
+                probs[-1] = 1
+            if (dp==1 and action_name!='R') or (dp==0 and action_name!='R' and action_name_!='R'):
+                probs.pop()
+                states.pop()  
+            if dp==0 and action_name=='R': 
+                probs[-1] = self.p
+            if dp==0 and action_name!='R' and action_name_=='R':
+                probs[-1] = 1-self.p
+            
         # If the agent cannot move in some of the directions
         probs_sum = np.sum(probs)
         if probs_sum<1:
