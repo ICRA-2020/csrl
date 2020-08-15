@@ -77,9 +77,11 @@ class OmegaAutomaton:
             the pair of the number of the Rabin pairs and the number of states and the spot object of the OA.
 
         """
+        env = os.environ.copy()
+        env["PATH"] = env["HOME"]+"/anaconda3/bin:" + env["PATH"]
 
         # Translate the LTL formula to an OA using Rabinizer 4.
-        out=check_output(['ltl2ldba', '-d', '-e', ltl] if self.oa_type == 'ldba' else ['ltl2dra', '-c', ltl], shell=platform=='win32')
+        out=check_output(['ltl2ldba', '-d', '-e', ltl] if self.oa_type == 'ldba' else ['ltl2dra', '-c', ltl], shell=platform=='win32', env=env)
 
         # Split the output into two parts: the header and the body
         header, body = out.decode('utf-8').split('--BODY--\n')
