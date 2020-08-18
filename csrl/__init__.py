@@ -52,7 +52,7 @@ class ControlSynthesis:
 
     def __init__(self, mdp, oa=None, discount=0.999999, discountB=0.9999, discountC=0.99):
         self.mdp = mdp
-        self.oa = oa if oa else OmegaAutomaton(' | '.join([ap+' | !'+ap for ap in (mdp.AP+set(mdp.second_agent))]))
+        self.oa = oa if oa else OmegaAutomaton(' | '.join([ap+' | !'+ap for ap in (mdp.AP+set(mdp.adversary))]))
         self.discount = discount
         self.discountB = discountB  # We can also explicitly define a function of discount
         self.discountC = discountC  # Same
@@ -67,7 +67,7 @@ class ControlSynthesis:
         self.reward = np.zeros(self.shape[:-1])
         for i,q,r,c in self.states():
             acc_type = self.oa.acc[q][mdp.label[r,c]][i]
-            self.reward[i,q,r,c] = 1-self.discountB if acc_type else (-1e-10 if acc_type is False else 0)
+            self.reward[i,q,r,c] = 1-self.discountB if acc_type else (-1e-20 if acc_type is False else 0)
 
         # Create the transition matrix
         if mdp.robust:
@@ -82,7 +82,7 @@ class ControlSynthesis:
                         else:  # epsilon-actions
                             self.transition_probs[i,q,r,c][action][action_] = ([(i,action-len(mdp.A),r,c)], [1.])
 
-        elif mdp.second_agent:
+        elif mdp.adversary:
             self.transition_probs = np.empty(mdp.shape+(len(self.mdp.A),),dtype=np.object)
             for r,c in self.states(short=True):
                 for action in range(len(self.mdp.A)):
@@ -290,19 +290,25 @@ class ControlSynthesis:
             k,q = (self.shape[0]-1,self.oa.q0)
             s1 = start if start else self.mdp.random_state()
             s2 = start_ if start_ else self.mdp.random_state()
+            
+            label = self.mdp.label[s1]
+            if s1 == s2:
+                label += self.mdp.adversary
+            q = self.oa.delta[q][label]  # OA transition
+        
             episode = [(k,q)+s1+s2]
             for t in range(T):
+                
+                states, probs = self.transition_probs[s1][policy[(k,q)+s1+s2]]
+                s1 = random.choices(states,weights=probs)[0]
 
-                states, probs = self.mdp.get_transition_prob(s1,self.mdp.A[policy[(k,q)+s1+s2]])
-                s1 = states[np.random.choice(len(states),p=probs)]
+                states, probs = self.transition_probs[s2][policy_[(k,q)+s1+s2]]
+                s2 = random.choices(states,weights=probs)[0]
 
                 label = self.mdp.label[s1]
                 if s1 == s2:
-                    label += self.mdp.second_agent
+                    label += self.mdp.adversary
                 q = self.oa.delta[q][label]  # OA transition
-
-                states, probs = self.mdp.get_transition_prob(s2,self.mdp.A[policy_[(k,q)+s1+s2]])
-                s2 = states[np.random.choice(len(states),p=probs)]
 
                 episode.append((k,q)+s1+s2)
 
@@ -336,7 +342,7 @@ class ControlSynthesis:
             pol_ = policy_[iq] if policy_ is not None else None
             self.mdp.plot(val,pol,pol_,**kwargs)
         else:
-            if self.mdp.second_agent:
+            if self.mdp.adversary:
                 # A helper function for the sliders
                 def plot_value(i,q,r1,c1,r2,c2):
                     val = value[i,q,:,:,r2,c2] if value is not None else None
@@ -367,7 +373,7 @@ class ControlSynthesis:
         policy_ = np.zeros((value.shape),dtype=np.int)
         action_values_ = np.empty(len(self.mdp.A))
 
-        if not self.mdp.second_agent:
+        if not self.mdp.adversary:
             for state in self.states():
                 # Bellman operator
                 action_values = np.zeros(len(self.A[state]))
@@ -383,13 +389,13 @@ class ControlSynthesis:
                 policy_[state] = self.A[state][action_min]
 
         else:
-            for k,q,r1,c1,r2,c2 in self.states(second=self.mdp.second_agent):
+            for k,q,r1,c1,r2,c2 in self.states(second=self.mdp.adversary):
                 s1 = r1,c1
                 s2 = r2,c2
 
                 label = self.mdp.label[s1]
                 if s1 == s2:
-                    label += self.mdp.second_agent
+                    label += self.mdp.adversary
                 q_ = self.oa.delta[q][label]  # OA transition
 
                 # Bellman operator
@@ -425,10 +431,10 @@ class ControlSynthesis:
             The value function.
         """
         # d = np.inf  # The difference between the last two steps
-        shape = self.shape[:-1] if not self.mdp.second_agent else self.oa.shape+self.mdp.shape+self.mdp.shape
+        shape = self.shape[:-1] if not self.mdp.adversary else self.oa.shape+self.mdp.shape+self.mdp.shape
         value = np.zeros(shape)
         shm = shared_memory.SharedMemory(create=True, size=value.nbytes)
-        states = list(self.states(second=self.mdp.second_agent))
+        states = list(self.states(second=self.mdp.adversary))
         m = cpu_count()
         n = len(states) // m
         arg_list = [[self,states[i*n:(i+1)*n],T,shape,shm.name] for i in range(m)]
@@ -444,11 +450,11 @@ class ControlSynthesis:
         n_actions = len(self.mdp.A)
         actions = list(range(n_actions))
 
-        if not self.mdp.second_agent:
+        if not self.mdp.adversary:
             shape = self.oa.shape + self.mdp.shape + (n_actions,n_actions)
             Q = np.zeros(shape)
             shm = shared_memory.SharedMemory(create=True, size=Q.nbytes)
-            m = cpu_count()
+            m = min(32,cpu_count())
             arg_list = [[self,T,K,start,shape,shm.name] for i in range(m)]
             with Pool(m) as p:
                 p.map(minimax_q_robust,arg_list)
@@ -458,14 +464,16 @@ class ControlSynthesis:
             return Q
         else:
             shape = self.oa.shape + self.mdp.shape + self.mdp.shape + (n_actions,)
-            Q = np.zeros(shape)
+            Q = np.ones(shape)
             Q_ = np.zeros(shape)
             shm = shared_memory.SharedMemory(create=True, size=Q.nbytes)
             shm_ = shared_memory.SharedMemory(create=True, size=Q_.nbytes)
-            m = cpu_count()
+            np.ndarray(Q.shape, dtype=Q.dtype, buffer=shm.buf).fill(0)
+            np.ndarray(Q_.shape, dtype=Q_.dtype, buffer=shm_.buf).fill(0)
+            m = min(32,cpu_count())
             arg_list = [[self,T,K,start,start_,shape,shm.name,shm_.name] for i in range(m)]
             with Pool(m) as p:
-                p.map(minimax_q_two_player,arg_list)
+                p.map(minimax_q_adversary,arg_list)
             Q = np.copy(np.ndarray(shape, dtype=np.float64, buffer=shm.buf))
             Q_ = np.copy(np.ndarray(shape, dtype=np.float64, buffer=shm_.buf))
             shm.close()
@@ -475,7 +483,7 @@ class ControlSynthesis:
             return Q, Q_
 
 
-def minimax_q_two_player(arg_list):
+def minimax_q_adversary(arg_list):
     self,T,K,start,start_,shape,shm_name,shm_name_ = arg_list
     shm = shared_memory.SharedMemory(name=shm_name)
     Q = np.ndarray(shape, dtype=np.float64, buffer=shm.buf)
@@ -488,8 +496,8 @@ def minimax_q_two_player(arg_list):
     
     for k in range(K):
         state = (self.shape[0]-1,self.oa.q0)+(start if start else self.mdp.random_state())
-        alpha = np.max((1.0*(1 - 1.5*k/K),0.001))
-        epsilon = np.max((1.0*(1 - 1.05*k/K),0.01))
+        alpha = 0.01 # np.max((1.0*(1 - 1.5*k/K),0.001))
+        epsilon = 0.01
 
         k,q = (self.shape[0]-1,self.oa.q0)
         s1 = start if start else self.mdp.random_state()
@@ -497,22 +505,23 @@ def minimax_q_two_player(arg_list):
 
         label = self.mdp.label[s1]
         if s1 == s2:
-            label += self.mdp.second_agent
+            label += self.mdp.adversary
         q = self.oa.delta[q][label]  # OA transition
 
         max_action = random.randrange(n_actions)
         max_q = 0
         for t in range(T):
 
-            if random.random() < epsilon:
+            if max_q==0 or random.random() < epsilon:
                 max_action = random.randrange(n_actions)
                 max_q = Q[k,q][s1][s2][max_action]
 
             states, probs = self.transition_probs[s1][max_action]
             next_s1 = random.choices(states,weights=probs)[0]
 
-            min_q, min_action = 1, 0
+            min_q, min_action, max_q_ = 1, 0, 0
             for action_ in range(n_actions):
+                max_q_ = max(Q_[k,q][next_s1][s2][action_],max_q_)
                 if Q_[k,q][next_s1][s2][action_] < min_q:
                     min_action = action_
                     min_q = Q_[k,q][next_s1][s2][action_] 
@@ -528,7 +537,7 @@ def minimax_q_two_player(arg_list):
 
             Q[k,q][s1][s2][max_action] = min(max_q + alpha * (reward + gamma*min_q - max_q), 1)
 
-            if random.random() < epsilon:
+            if max_q_==0 or random.random() < epsilon:
                 min_action = random.randrange(n_actions)
                 min_q = Q_[k,q][next_s1][s2][min_action]
 
@@ -537,7 +546,7 @@ def minimax_q_two_player(arg_list):
 
             label = self.mdp.label[next_s1]
             if next_s1 == next_s2:
-                label += self.mdp.second_agent
+                label += self.mdp.adversary
             next_q = self.oa.delta[q][label]  # OA transition
 
             max_q, max_action = 0, 0
@@ -560,51 +569,40 @@ def minimax_q_robust(arg_list):
     actions = list(range(n_actions))
     for k in range(K):
         state = (self.shape[0]-1,self.oa.q0)+(start if start else self.mdp.random_state())
-        alpha = np.max((1.0*(1 - 1.5*k/K),0.001))
-        epsilon = np.max((1.0*(1 - 1.05*k/K),0.01))
+        alpha = 0.01 
+        epsilon = 0.01
+        max_action, min_action, max_q = 0, 0, 0
         for t in range(T):
 
                 # Follow an epsilon-greedy policy
-                if random.random() < epsilon:
+                if max_q==0 or random.random() < epsilon:
                     max_action = random.randrange(n_actions)
                     min_action = random.randrange(n_actions)
                     max_q = Q[state][max_action][min_action]
-                else:
-                    max_action, max_q = 0, 0
-                    min_action = 0
-                    for i in range(n_actions):
-                        action_, min_q = 0, 1
-                        for j in range(n_actions):
-                            if Q[state][i][j] < min_q:
-                                action_ = j
-                                min_q = Q[state][i][j]
-                        if min_q > max_q:
-                            min_action = action_
-                            max_action = i
-                            max_q = min_q
-
-
 
                 # Observe the next state
                 states, probs = self.transition_probs[state][max_action][min_action]
                 next_state = random.choices(states,weights=probs)[0]
 
-                next_max_q = 0
+                next_max_action, next_min_action, next_max_q = 0, 0, 0
                 for i in range(n_actions):
-                    next_min_q = 1
+                    action_, min_q = 0, 1
                     for j in range(n_actions):
-                        if Q[next_state][i][j] < next_min_q:
-                            next_min_q = Q[next_state][i][j]
-                    if next_min_q > next_max_q:
-                        next_max_q = next_min_q
+                        if Q[next_state][i][j] < min_q:
+                            action_ = j
+                            min_q = Q[next_state][i][j]
+                    if min_q > next_max_q:
+                        next_max_action = i
+                        next_min_action = action_
+                        next_max_q = min_q
 
                 reward = self.reward[state]
                 gamma = self.discountB if self.reward[state]>0 else (self.discountC if self.reward[state]<0 else self.discount)
 
                 # Q-update
-                Q[state][max_action][min_action] += alpha * (reward + gamma*next_max_q - max_q)
+                Q[state][max_action][min_action] = max_q + alpha * (reward + gamma*next_max_q - max_q)
 
-                state = next_state
+                state, max_action, min_action, max_q = next_state, next_max_action, next_min_action, next_max_q
 
 def shapley_iteration(args):
     pr = cProfile.Profile()
@@ -618,7 +616,7 @@ def shapley_iteration(args):
 #     old_value = np.copy(value)
     while t < T:
         for state in states:
-            if not self.mdp.second_agent:
+            if not self.mdp.adversary:
                 # Bellman operator
                 action_values = np.empty(len(self.A[state]))
                 action_max = 0
@@ -642,7 +640,7 @@ def shapley_iteration(args):
 
                 label = self.mdp.label[s1]
                 if s1 == s2:
-                    label += self.mdp.second_agent
+                    label += self.mdp.adversary
                 q_ = self.oa.delta[q][label]  # OA transition
 
                 # Bellman operator

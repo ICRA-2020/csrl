@@ -79,7 +79,7 @@ class GridMDP():
 
     """
 
-    def __init__(self, shape, structure=None, reward=None, label=None, A=Actions, p=0.8, figsize=6, lcmap={}, cmap=plt.cm.RdBu, robust=False, second_agent=()):
+    def __init__(self, shape, structure=None, reward=None, label=None, A=Actions, p=0.8, figsize=6, lcmap={}, cmap=plt.cm.RdBu, robust=False, adversary=()):
         self.shape = shape
         n_rows, n_cols = shape
 
@@ -90,7 +90,7 @@ class GridMDP():
         self.label.fill(()) if label is None else None
 
         self.robust = robust
-        self.second_agent = second_agent
+        self.adversary = adversary
         self.p = p
         self.A = A
 
@@ -170,7 +170,7 @@ class GridMDP():
         elif (action_name=='U' and action_name_=='D') or (action_name=='D' and action_name_=='U') or \
              (action_name=='R' and action_name_=='L') or (action_name=='L' and action_name_=='R'):
             dp = -1
-        elif action_name:
+        elif action_name_:
             dp = 0
 
         # South
@@ -184,9 +184,9 @@ class GridMDP():
                 probs.pop()
                 states.pop()  
             if dp==0 and action_name=='D': 
-                probs[-1] = self.p
+                probs[-1] = self.p + (1-self.p)/2
             if dp==0 and action_name!='D' and action_name_=='D':
-                probs[-1] = 1-self.p
+                probs[-1] = (1-self.p)/2
                             
         # North
         if action_name!='D' and state[0]-1 >= 0 and self.structure[state[0]-1][state[1]] != 'B' and cell_type != 'D':
@@ -199,9 +199,9 @@ class GridMDP():
                 probs.pop()
                 states.pop()  
             if dp==0 and action_name=='U': 
-                probs[-1] = self.p
+                probs[-1] = self.p + (1-self.p)/2
             if dp==0 and action_name!='U' and action_name_=='U':
-                probs[-1] = 1-self.p
+                probs[-1] = (1-self.p)/2
                 
         # West
         if action_name!='R' and state[1]-1 >= 0 and self.structure[state[0]][state[1]-1] != 'B' and cell_type != 'R':
@@ -214,9 +214,9 @@ class GridMDP():
                 probs.pop()
                 states.pop()  
             if dp==0 and action_name=='L': 
-                probs[-1] = self.p
+                probs[-1] = self.p + (1-self.p)/2
             if dp==0 and action_name!='L' and action_name_=='L':
-                probs[-1] = 1-self.p
+                probs[-1] = (1-self.p)/2
         
         # East
         if action_name!='L' and state[1]+1 < n_cols and self.structure[state[0]][state[1]+1] != 'B' and cell_type != 'L':
@@ -230,9 +230,9 @@ class GridMDP():
                 probs.pop()
                 states.pop()  
             if dp==0 and action_name=='R': 
-                probs[-1] = self.p
+                probs[-1] = self.p + (1-self.p)/2
             if dp==0 and action_name!='R' and action_name_=='R':
-                probs[-1] = 1-self.p
+                probs[-1] = (1-self.p)/2
             
         # If the agent cannot move in some of the directions
         probs_sum = np.sum(probs)
