@@ -79,7 +79,7 @@ class GridMDP():
 
     """
 
-    def __init__(self, shape, structure=None, reward=None, label=None, A=Actions, p=0.8, figsize=6, lcmap={}, cmap=plt.cm.RdBu, robust=False, adversary=()):
+    def __init__(self, shape, structure=None, reward=None, label=None, A=Actions, p=0.8, figsize=6, lcmap={}, cmap=plt.cm.RdBu, robust=False, adversary=None):
         self.shape = shape
         n_rows, n_cols = shape
 
@@ -319,16 +319,16 @@ class GridMDP():
         for i, j in self.states():  # For all states
             if (i,j) in path:
                 if 'u' in path[i,j]:
-                    rect=plt.Rectangle((j-0.4,i+0.4),+0.8,-0.9,color='lightcoral')
+                    rect=plt.Rectangle((j-0.4,i+0.4),+0.8,-0.9,color='lightsteelblue')
                     plt.gcf().gca().add_artist(rect)
                 if 'd' in path[i,j]:
-                    rect=plt.Rectangle((j-0.4,i-0.4),+0.8,+0.9,color='lightcoral')
+                    rect=plt.Rectangle((j-0.4,i-0.4),+0.8,+0.9,color='lightsteelblue')
                     plt.gcf().gca().add_artist(rect)
                 if 'r' in path[i,j]:
-                    rect=plt.Rectangle((j-0.4,i-0.4),+0.9,+0.8,color='lightcoral')
+                    rect=plt.Rectangle((j-0.4,i-0.4),+0.9,+0.8,color='lightsteelblue')
                     plt.gcf().gca().add_artist(rect)
                 if 'l' in path[i,j]:
-                    rect=plt.Rectangle((j+0.4,i-0.4),-0.9,+0.8,color='lightcoral')
+                    rect=plt.Rectangle((j+0.4,i-0.4),-0.9,+0.8,color='lightsteelblue')
                     plt.gcf().gca().add_artist(rect)
 
             cell_type = self.structure[i,j]
@@ -359,7 +359,7 @@ class GridMDP():
             # If the background is too dark, make the text white
             color = 'snow' if np.abs(value[i, j]) > threshold/2 else 'black'
             acolor = 'snow' if np.abs(value[i, j]) > threshold/2 else 'black'
-            acolor_ = 'lightpink' if np.abs(value[i, j]) > threshold/2 else 'deeppink'
+            acolor_ = 'red' if np.abs(value[i, j]) > threshold/2 else 'red'
 
             if policy is None:  # Print the values
                 v = str(int(round(100*value[i,j]))).zfill(3)
@@ -385,22 +385,50 @@ class GridMDP():
                         plt.arrow(j+.15,i-0.15,-0.2,0,head_width=.2,head_length=.15,color=acolor)
 
                     if policy_ is not None:
-                        action_name = self.A[policy_[i,j]]
-                        if action_name == 'U':
-                            plt.arrow(pos[0],pos[1],0,-0.1,head_width=.13,head_length=.07,color=acolor_)
-                        elif action_name == 'D':
-                            plt.arrow(pos[0],pos[1],0,0.1,head_width=.13,head_length=.07,color=acolor_)
-                        elif action_name == 'R':
-                            plt.arrow(pos[0],pos[1],0.1,0,head_width=.13,head_length=.07,color=acolor_)
-                        elif action_name == 'L':
-                            plt.arrow(pos[0],pos[1],-0.1,0,head_width=.13,head_length=.07,color=acolor_)
+                        action_name_ = self.A[policy_[i,j]]
+                        if action_name==action_name_:
+                            dp = 1
+                        elif (action_name=='U' and action_name_=='D') or (action_name=='D' and action_name_=='U') or \
+                             (action_name=='R' and action_name_=='L') or (action_name=='L' and action_name_=='R'):
+                            dp = -1
+                        else:
+                            dp = 0
+                        
+                        if dp==0:
+                            if action_name_ == 'U':
+                                plt.arrow(pos[0],pos[1],0,-0.1,head_width=.13,head_length=.07,color=acolor_)
+                            elif action_name_ == 'D':
+                                plt.arrow(pos[0],pos[1],0,0.1,head_width=.13,head_length=.07,color=acolor_)
+                            elif action_name_ == 'R':
+                                plt.arrow(pos[0],pos[1],0.1,0,head_width=.13,head_length=.07,color=acolor_)
+                            elif action_name_ == 'L':
+                                plt.arrow(pos[0],pos[1],-0.1,0,head_width=.13,head_length=.07,color=acolor_)
+                        elif dp==-1:
+                            if action_name_ == 'U' or action_name_ == 'D':
+                                plt.arrow(pos[0],pos[1],0.1,0,head_width=.13,head_length=.07,color=acolor_)
+                                plt.arrow(pos[0],pos[1],-0.1,0,head_width=.13,head_length=.07,color=acolor_)
+                            else:
+                                plt.arrow(pos[0],pos[1],0,-0.1,head_width=.13,head_length=.07,color=acolor_)
+                                plt.arrow(pos[0],pos[1],0,0.1,head_width=.13,head_length=.07,color=acolor_)
             # Plot the labels
             surplus = 0.2 if (i,j) in hidden else 0
-            if self.label[i,j] in self.lcmap:
-                circle=plt.Circle((j, i+0.24-surplus),0.2+surplus/2,color=self.lcmap[self.label[i,j]])
-                plt.gcf().gca().add_artist(circle)
+            if len(self.label[i,j])==1:
+                l=self.label[i,j][0]
+                if l in self.lcmap:
+                    circle=plt.Circle((j, i+0.25-surplus),0.2+surplus/2,color=self.lcmap[l])
+                    plt.gcf().gca().add_artist(circle)
+
+            elif len(self.label[i,j])==2:
+                l1, l2 = self.label[i,j]
+                if l1 in self.lcmap:
+                    circle=plt.Circle((j-0.2, i+0.25-surplus),0.2+surplus/2,color=self.lcmap[l1])
+                    plt.gcf().gca().add_artist(circle)
+                if l2 in self.lcmap:
+                    circle=plt.Circle((j+0.2, i+0.25-surplus),0.2+surplus/2,color=self.lcmap[l2])
+                    plt.gcf().gca().add_artist(circle)
+
             if self.label[i,j]:
-                plt.text(j, i+0.4-surplus,'$'+','.join(self.label[i,j])+'$',horizontalalignment='center',color=color,fontproperties=f,fontname=fontname,fontsize=fontsize+5+surplus*10)
+                    plt.text(j, i+0.4-surplus,'$'+','.join(self.label[i,j])+'$',horizontalalignment='center',color=color,fontproperties=f,fontname=fontname,fontsize=fontsize+5+surplus*10)
 
         if agent_:
             circle_=plt.Circle((agent_[1],agent_[0]-0.17),0.26,color='lightpink',ec='deeppink',lw=2)

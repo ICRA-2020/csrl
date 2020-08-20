@@ -82,7 +82,7 @@ class ControlSynthesis:
                         else:  # epsilon-actions
                             self.transition_probs[i,q,r,c][action][action_] = ([(i,action-len(mdp.A),r,c)], [1.])
 
-        elif mdp.adversary:
+        elif mdp.adversary is not None:
             self.transition_probs = np.empty(mdp.shape+(len(self.mdp.A),),dtype=np.object)
             for r,c in self.states(short=True):
                 for action in range(len(self.mdp.A)):
@@ -293,7 +293,7 @@ class ControlSynthesis:
             
             label = self.mdp.label[s1]
             if s1 == s2:
-                label += self.mdp.adversary
+                label = self.mdp.adversary + label
             q = self.oa.delta[q][label]  # OA transition
         
             episode = [(k,q)+s1+s2]
@@ -307,7 +307,7 @@ class ControlSynthesis:
 
                 label = self.mdp.label[s1]
                 if s1 == s2:
-                    label += self.mdp.adversary
+                    label = self.mdp.adversary + label
                 q = self.oa.delta[q][label]  # OA transition
 
                 episode.append((k,q)+s1+s2)
@@ -321,7 +321,7 @@ class ControlSynthesis:
 
             return episode
 
-    def plot(self, value=None, policy=None, policy_=None, iq=None, **kwargs):
+    def plot(self, value=None, policy=None, policy_=None, iq=None, rc=None, rc_=None, **kwargs):
         """Plots the values of the states as a color matrix with two sliders.
 
         Parameters
@@ -335,14 +335,29 @@ class ControlSynthesis:
         save : str
             The name of the file the image will be saved to. It is optional
         """
-
-        if iq:
-            val = value[iq] if value is not None else None
-            pol = policy[iq] if policy is not None else None
-            pol_ = policy_[iq] if policy_ is not None else None
-            self.mdp.plot(val,pol,pol_,**kwargs)
-        else:
-            if self.mdp.adversary:
+        if self.mdp.adversary is not None:
+            if iq:
+                if rc:
+                    val = value[iq][rc] if value is not None else None
+                    pol = policy_[iq][rc] if policy is not None else None
+                    self.mdp.plot(val,pol,**kwargs)
+                elif rc_:
+                    val = value[iq][:,:,rc_[0],rc_[1]] if value is not None else None
+                    pol = policy[iq][:,:,rc_[0],rc_[1]] if policy is not None else None
+                    self.mdp.plot(val,pol,**kwargs)
+                else:
+                    # A helper function for the sliders
+                    def plot_value(r1,c1,r2,c2):
+                        val = value[iq][:,:,r2,c2] if value is not None else None
+                        pol = policy[iq][:,:,r2,c2] if policy is not None else None
+                        pol_ = policy_[iq][r1,c1,:,:] if policy_ is not None else None
+                        self.mdp.plot(val,pol,pol_,**kwargs)
+                    r1 = IntSlider(value=0,min=0,max=self.mdp.shape[0]-1)
+                    c1 = IntSlider(value=0,min=0,max=self.mdp.shape[1]-1)
+                    r2 = IntSlider(value=0,min=0,max=self.mdp.shape[0]-1)
+                    c2 = IntSlider(value=0,min=0,max=self.mdp.shape[1]-1)
+                    interact(plot_value,r1=r1,c1=c1,r2=r2,c2=c2)
+            else:
                 # A helper function for the sliders
                 def plot_value(i,q,r1,c1,r2,c2):
                     val = value[i,q,:,:,r2,c2] if value is not None else None
@@ -356,16 +371,21 @@ class ControlSynthesis:
                 r2 = IntSlider(value=0,min=0,max=self.mdp.shape[0]-1)
                 c2 = IntSlider(value=0,min=0,max=self.mdp.shape[1]-1)
                 interact(plot_value,i=i,q=q,r1=r1,c1=c1,r2=r2,c2=c2)
-            else:
-                # A helper function for the sliders
-                def plot_value(i,q):
-                    val = value[i,q] if value is not None else None
-                    pol = policy[i,q] if policy is not None else None
-                    pol_ = policy_[i,q] if policy_ is not None else None
-                    self.mdp.plot(val,pol,pol_,**kwargs)
-                i = IntSlider(value=0,min=0,max=self.shape[0]-1)
-                q = IntSlider(value=self.oa.q0,min=0,max=self.shape[1]-1)
-                interact(plot_value,i=i,q=q)
+        elif iq:
+            val = value[iq] if value is not None else None
+            pol = policy[iq] if policy is not None else None
+            pol_ = policy_[iq] if policy_ is not None else None
+            self.mdp.plot(val,pol,pol_,**kwargs)
+        else:
+            # A helper function for the sliders
+            def plot_value(i,q):
+                val = value[i,q] if value is not None else None
+                pol = policy[i,q] if policy is not None else None
+                pol_ = policy_[i,q] if policy_ is not None else None
+                self.mdp.plot(val,pol,pol_,**kwargs)
+            i = IntSlider(value=0,min=0,max=self.shape[0]-1)
+            q = IntSlider(value=self.oa.q0,min=0,max=self.shape[1]-1)
+            interact(plot_value,i=i,q=q)
 
     def get_greedy_policies(self, value):
 
@@ -395,7 +415,7 @@ class ControlSynthesis:
 
                 label = self.mdp.label[s1]
                 if s1 == s2:
-                    label += self.mdp.adversary
+                    label = self.mdp.adversary + label
                 q_ = self.oa.delta[q][label]  # OA transition
 
                 # Bellman operator
@@ -450,7 +470,7 @@ class ControlSynthesis:
         n_actions = len(self.mdp.A)
         actions = list(range(n_actions))
 
-        if not self.mdp.adversary:
+        if self.mdp.adversary is None:
             shape = self.oa.shape + self.mdp.shape + (n_actions,n_actions)
             Q = np.zeros(shape)
             shm = shared_memory.SharedMemory(create=True, size=Q.nbytes)
@@ -468,8 +488,6 @@ class ControlSynthesis:
             Q_ = np.zeros(shape)
             shm = shared_memory.SharedMemory(create=True, size=Q.nbytes)
             shm_ = shared_memory.SharedMemory(create=True, size=Q_.nbytes)
-            np.ndarray(Q.shape, dtype=Q.dtype, buffer=shm.buf).fill(0)
-            np.ndarray(Q_.shape, dtype=Q_.dtype, buffer=shm_.buf).fill(0)
             m = min(32,cpu_count())
             arg_list = [[self,T,K,start,start_,shape,shm.name,shm_.name] for i in range(m)]
             with Pool(m) as p:
@@ -494,20 +512,25 @@ def minimax_q_adversary(arg_list):
     n_actions = len(self.mdp.A)
     actions = list(range(n_actions))
     
-    for k in range(K):
-        state = (self.shape[0]-1,self.oa.q0)+(start if start else self.mdp.random_state())
+    for _ in range(K):
         alpha = 0.01 # np.max((1.0*(1 - 1.5*k/K),0.001))
         epsilon = 0.01
-
         k,q = (self.shape[0]-1,self.oa.q0)
         s1 = start if start else self.mdp.random_state()
         s2 = start_ if start_ else self.mdp.random_state()
 
         label = self.mdp.label[s1]
         if s1 == s2:
-            label += self.mdp.adversary
+            label = self.mdp.adversary + label
         q = self.oa.delta[q][label]  # OA transition
-
+        acc_type = self.oa.acc[q][label][k]
+        reward = 0
+        gamma = self.discount
+        if acc_type is True:
+            reward = 1-self.discountB
+            gamma = self.discountB
+        elif acc_type is False:
+            gamma = self.discountC
         max_action = random.randrange(n_actions)
         max_q = 0
         for t in range(T):
@@ -526,15 +549,6 @@ def minimax_q_adversary(arg_list):
                     min_action = action_
                     min_q = Q_[k,q][next_s1][s2][action_] 
 
-            acc_type = self.oa.acc[q][label][k]
-            reward = 0
-            gamma = self.discount
-            if acc_type is True:
-                reward = 1-self.discountB
-                gamma = self.discountB
-            elif acc_type is False:
-                gamma = self.discountC
-
             Q[k,q][s1][s2][max_action] = min(max_q + alpha * (reward + gamma*min_q - max_q), 1)
 
             if max_q_==0 or random.random() < epsilon:
@@ -546,8 +560,17 @@ def minimax_q_adversary(arg_list):
 
             label = self.mdp.label[next_s1]
             if next_s1 == next_s2:
-                label += self.mdp.adversary
+                label = self.mdp.adversary + label
             next_q = self.oa.delta[q][label]  # OA transition
+            
+            acc_type = self.oa.acc[q][label][k]
+            reward = 0
+            gamma = self.discount
+            if acc_type is True:
+                reward = 1-self.discountB
+                gamma = self.discountB
+            elif acc_type is False:
+                gamma = self.discountC
 
             max_q, max_action = 0, 0
             for action in range(n_actions):
@@ -640,7 +663,7 @@ def shapley_iteration(args):
 
                 label = self.mdp.label[s1]
                 if s1 == s2:
-                    label += self.mdp.adversary
+                    label = self.mdp.adversary + label
                 q_ = self.oa.delta[q][label]  # OA transition
 
                 # Bellman operator
