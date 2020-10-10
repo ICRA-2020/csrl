@@ -19,20 +19,11 @@ import cProfile, pstats, io
 from pstats import SortKey
 
 import random
+import pickle
 
+    # TODO: Add documentation for the attributes of this class and the methods
 class ControlSynthesis:
     """This class is the implementation of our main control synthesis algorithm.
-
-    Attributes
-    ----------
-    shape : (n_pairs, n_qs, n_rows, n_cols, n_actions)
-        The shape of the product MDP.
-
-    reward : array, shape=(n_pairs,n_qs,n_rows,n_cols)
-        The reward function of the star-MDP. self.reward[state] = 1-discountB if 'state' belongs to B, 0 otherwise.
-
-    transition_probs : array, shape=(n_pairs,n_qs,n_rows,n_cols,n_actions)
-        The transition probabilities. self.transition_probs[state][action] stores a pair of lists ([s1,s2,..],[p1,p2,...]) that contains only positive probabilities and the corresponding transitions.
 
     Parameters
     ----------
@@ -46,52 +37,58 @@ class ControlSynthesis:
         The discount factor.
 
     discountB : float
-        The discount factor applied to B states.
+        The discount factor to be applied to B states.
+        
+    discountB : float
+        The discount factor to be applied to C states.
 
     """
 
-    def __init__(self, mdp, oa=None, discount=0.999999, discountB=0.9999, discountC=0.99):
+    def __init__(self, mdp, oa=None, discount=0.999, discountB=0.99, discountC=0.9):
+        # TODO: Seperate the initialization code into two parts for MDPs and SGs
         self.mdp = mdp
-        self.oa = oa if oa else OmegaAutomaton(' | '.join([ap+' | !'+ap for ap in (mdp.AP+set(mdp.adversary))]))
+        self.oa = oa if oa else OmegaAutomaton(' | '.join([ap+' | !'+ap for ap in (mdp.AP+set(mdp.adversary))]))  # Get transitions for every atomic propositions used in the MDP
         self.discount = discount
         self.discountB = discountB  # We can also explicitly define a function of discount
         self.discountC = discountC  # Same
-        self.shape = self.oa.shape + mdp.shape + (len(mdp.A)+self.oa.shape[1],)
+        # TODO: Replace the last element of the shape with (len(mdp.A),)
+        self.shape = self.oa.shape + mdp.shape + (len(mdp.A)+self.oa.shape[1],)  # +self.oa.shape[1] is for epsilon transitions in LDBAs
 
         # Create the action matrix
         self.A = np.empty(self.shape[:-1],dtype=np.object)
-        for i,q,r,c in self.states():
-            self.A[i,q,r,c] = list(range(len(mdp.A))) + [len(mdp.A)+e_a for e_a in self.oa.eps[q]]
+        for i,q,r,c in self.states():  # Enrich the action set with epsilon-actions
+            self.A[i,q,r,c] = list(range(len(mdp.A))) + [len(mdp.A)+e_a for e_a in self.oa.eps[q]]  # List of actions that can be taken in a particular state
 
         # Create the reward matrix
         self.reward = np.zeros(self.shape[:-1])
         for i,q,r,c in self.states():
             acc_type = self.oa.acc[q][mdp.label[r,c]][i]
-            self.reward[i,q,r,c] = 1-self.discountB if acc_type else (-1e-20 if acc_type is False else 0)
+            self.reward[i,q,r,c] = 1-self.discountB if acc_type else (-1e-20 if acc_type is False else 0)  # The small negative reward is for identification of C states
 
         # Create the transition matrix
-        if mdp.robust:
-            self.transition_probs = np.empty(self.shape+(len(self.mdp.A),),dtype=np.object)  # Enrich the action set with epsilon-actions
+        if mdp.robust:  # This is for the scenario where the transition probabilities are determined by the joint actions of both players
+            self.transition_probs = np.empty(self.shape+(len(self.mdp.A),),dtype=np.object)  
             for i,q,r,c in self.states():
                 for action in self.A[i,q,r,c]:
                     for action_ in range(len(self.mdp.A)):
-                        if action < len(self.mdp.A):  # MDP actions
+                        # TODO: This if condition is always true, so remove it
+                        if action < len(self.mdp.A):  # MDP actions  
                             q_ = self.oa.delta[q][mdp.label[r,c]]  # OA transition
                             mdp_states, probs = mdp.get_transition_prob((r,c),mdp.A[action],mdp.A[action_])  # MDP transition
                             self.transition_probs[i,q,r,c][action][action_] = [(i,q_,)+s for s in mdp_states], probs
                         else:  # epsilon-actions
                             self.transition_probs[i,q,r,c][action][action_] = ([(i,action-len(mdp.A),r,c)], [1.])
 
-        elif mdp.adversary is not None:
-            self.transition_probs = np.empty(mdp.shape+(len(self.mdp.A),),dtype=np.object)
+        elif mdp.adversary is not None:  # This is for two independent players on the grid
+            self.transition_probs = np.empty(mdp.shape+(len(self.mdp.A),),dtype=np.object)  # Standard transition probs
             for r,c in self.states(short=True):
                 for action in range(len(self.mdp.A)):
                     self.transition_probs[r,c][action] = mdp.get_transition_prob((r,c),mdp.A[action])
         else:
             self.transition_probs = np.empty(self.shape,dtype=np.object)
             for i,q,r,c in self.states():
-                for action in self.A[i,q,r,c]:
-                    if action < len(self.mdp.A):  # MDP actions
+                for action in self.A[i,q,r,c]: 
+                    if action < len(self.mdp.A):
                         q_ = self.oa.delta[q][mdp.label[r,c]]  # OA transition
                         mdp_states, probs = mdp.get_transition_prob((r,c),mdp.A[action])  # MDP transition
                         self.transition_probs[i,q,r,c][action] = [(i,q_,)+s for s in mdp_states], probs
@@ -259,6 +256,8 @@ class ControlSynthesis:
         episode: list
             A sequence of states
         """
+        
+        # TODO: Update the simulation code to handle two-player scenarios
         T = T if T else np.prod(self.shape[:-1])
         if policy_ is None:
             state = (self.shape[0]-1,self.oa.q0)+(start if start else self.mdp.random_state())
@@ -387,54 +386,7 @@ class ControlSynthesis:
             q = IntSlider(value=self.oa.q0,min=0,max=self.shape[1]-1)
             interact(plot_value,i=i,q=q)
 
-    def get_greedy_policies(self, value):
-
-        policy = np.zeros((value.shape),dtype=np.int)
-        policy_ = np.zeros((value.shape),dtype=np.int)
-        action_values_ = np.empty(len(self.mdp.A))
-
-        if not self.mdp.adversary:
-            for state in self.states():
-                # Bellman operator
-                action_values = np.zeros(len(self.A[state]))
-                action_mins = np.zeros(len(self.A[state]),dtype=np.int)
-                for i,action in enumerate(self.A[state]):
-                    for j,action_ in enumerate(range(len(self.mdp.A))):
-                        action_values_[j] = np.sum([value[s]*p for s,p in zip(*self.transition_probs[state][action][action_])])
-                    action_values[i] = np.min(action_values_)
-                    action_mins[i] = np.argmin(action_values_)
-                action_max = np.argmax(action_values)
-                action_min = action_mins[action_max]
-                policy[state] = self.A[state][action_max]
-                policy_[state] = self.A[state][action_min]
-
-        else:
-            for k,q,r1,c1,r2,c2 in self.states(second=self.mdp.adversary):
-                s1 = r1,c1
-                s2 = r2,c2
-
-                label = self.mdp.label[s1]
-                if s1 == s2:
-                    label = self.mdp.adversary + label
-                q_ = self.oa.delta[q][label]  # OA transition
-
-                # Bellman operator
-                action_values = np.zeros(len(self.A[k,q,r1,c1]))
-                for i,action in enumerate(self.A[k,q,r1,c1]):
-                    # for s, p in zip(*self.mdp.get_transition_prob(s1,self.mdp.A[action])):
-                    for s, p in zip(*self.transition_probs[s1][action]):
-                        for j,action_ in enumerate(range(len(self.mdp.A))):
-                            # action_values_[j] = np.sum([value[k,q_][s][s_]*p_ for s_,p_ in zip(*self.mdp.get_transition_prob(s2,self.mdp.A[action_]))])
-                            action_values_[j] = np.sum([value[k,q_][s][s_]*p_ for s_,p_ in zip(*self.transition_probs[s2][action_])])
-                        action_values[i] += np.min(action_values_)*p
-                        policy_[k,q_][s][s2] = np.argmin(action_values_)
-
-                policy[k,q][s1][s2] = self.A[k,q,r1,c1][np.argmax(action_values)]
-
-        return policy, policy_
-
-
-    def shapley(self, T=None, threshold=None):
+    def shapley(self, T=None):
         """Performs the Shapley's algorithm and returns the value function. It requires at least one parameter.
 
         Parameters
@@ -442,259 +394,300 @@ class ControlSynthesis:
         T : int
             The number of iterations.
 
-        threshold: float
-            The threshold value to be used in the stopping condition.
-
         Returns
         -------
         value: array, size=(n_pairs,n_qs,n_rows,n_cols)
             The value function.
         """
-        # d = np.inf  # The difference between the last two steps
-        shape = self.shape[:-1] if not self.mdp.adversary else self.oa.shape+self.mdp.shape+self.mdp.shape
-        value = np.zeros(shape)
-        shm = shared_memory.SharedMemory(create=True, size=value.nbytes)
-        states = list(self.states(second=self.mdp.adversary))
-        m = cpu_count()
-        n = len(states) // m
-        arg_list = [[self,states[i*n:(i+1)*n],T,shape,shm.name] for i in range(m)]
-        arg_list[-1][1] = states[(m-1)*n:]
-        with Pool(m) as p:
-            stats = p.map(shapley_iteration,arg_list)
-        value = np.copy(np.ndarray(shape, dtype=np.float64, buffer=shm.buf))
-        shm.close()
-        shm.unlink()
-        return value, stats
+        n_actions = len(self.mdp.A)
+        n_pairs = self.oa.shape[0]
+            
+        if self.mdp.adversary:
+            suffix = str((T-1).bit_length())
+            with open('shapley_adversary_csrl-'+suffix+'.pkl','wb') as f:
+                pickle.dump(self,f)
+
+            states = list(self.states(second=True))
+            shape = self.oa.shape+self.mdp.shape+self.mdp.shape+(n_actions,)
+            Q = np.zeros(shape)
+            Q_ = np.zeros(shape)
+            
+            t = 0
+            while t < T:
+                value = np.max(Q,axis=-1)
+                
+                for state in states:
+                    i,q,r1,c1,r2,c2 = state
+                    s1 = r1,c1
+                    s2 = r2,c2
+                    for k in range(n_actions):
+                        val=0
+                        for s,p in zip(*self.transition_probs[s2][k]):
+                            val += value[i,q][s1][s]*p
+                        Q_[state][k] = val
+                
+                value_ = np.min(Q_,axis=-1)
+                
+                for state in states:
+                    i,q,r1,c1,r2,c2 = state
+                    s1 = r1,c1
+                    s2 = r2,c2
+                    
+                    label = self.mdp.label[s1]
+                    if s1 == s2:
+                        label = self.mdp.adversary + label
+                    q_ = self.oa.delta[q][label]  # OA transition
+                    
+                    acc_type = self.oa.acc[q][label][i]
+                    reward = 0
+                    gamma = self.discount
+                    if acc_type is True:
+                        reward = 1-self.discountB
+                        gamma = self.discountB
+                    elif acc_type is False:
+                        gamma = self.discountC
+                    
+                    for j in range(n_actions):
+                        val=0
+                        for s,p in zip(*self.transition_probs[s1][j]):
+                            val += value_[i,q_][s][s2]*p
+                        Q[state][j] = reward + gamma*val
+                
+                eps_Q = self.discountC*np.max(Q,axis=0)
+                for i in range(n_pairs):
+                    Q[i] = np.maximum(Q[i],eps_Q)
+                
+                t+=1
+                
+                if t>=2**10 and t.bit_length() != (t-1).bit_length():
+                    suffix = str((t-1).bit_length())
+                    np.save('shapley_adversary_Q-Q_-'+suffix,(Q,Q_))
+                
+            return Q,Q_
+
+        
+        else:
+            suffix = str((T-1).bit_length())
+            with open('shapley_robust_csrl-'+suffix+'.pkl','wb') as f:
+                pickle.dump(self,f)
+                
+            states = list(self.states(second=False))
+            shape = self.oa.shape+self.mdp.shape+(n_actions,n_actions)
+            Q = np.zeros(shape)
+            discount = np.copy(self.reward)
+            for state in states:
+                discount[state] = self.discountB if self.reward[state]>0 else (self.discountC if self.reward[state]<0 else self.discount)
+        
+            t = 0
+            while t < T:
+                value = np.max(np.min(Q,axis=-1),axis=-1)
+                for state in states:
+                    gamma, reward, probs = discount[state], self.reward[state], self.transition_probs[state]
+                    for j in range(n_actions):
+                        for k in range(n_actions):
+                            val = 0
+                            for s,p in zip(*probs[j][k]):
+                                val += value[s]*p
+                            Q[state][j][k] = reward + gamma*val
+                            
+                eps_Q = self.discountC*np.max(Q,axis=0)
+                for i in range(n_pairs):
+                    Q[i] = np.maximum(Q[i],eps_Q)
+                
+                t+=1
+                
+                if t>=2**15 and t.bit_length() != (t-1).bit_length():
+                    suffix = str((t-1).bit_length())
+                    np.save('shapley_robust_Q-'+suffix,Q)
+            
+            return Q
     
     def minimax_q(self,start=None,start_=None,T=None,K=None):
         n_actions = len(self.mdp.A)
-        actions = list(range(n_actions))
-
-        if self.mdp.adversary is None:
-            shape = self.oa.shape + self.mdp.shape + (n_actions,n_actions)
-            Q = np.zeros(shape)
-            shm = shared_memory.SharedMemory(create=True, size=Q.nbytes)
-            m = min(32,cpu_count())
-            arg_list = [[self,T,K,start,shape,shm.name] for i in range(m)]
-            with Pool(m) as p:
-                p.map(minimax_q_robust,arg_list)
-            Q = np.copy(np.ndarray(shape, dtype=np.float64, buffer=shm.buf))
-            shm.close()
-            shm.unlink()
-            return Q
-        else:
-            shape = self.oa.shape + self.mdp.shape + self.mdp.shape + (n_actions,)
-            Q = np.ones(shape)
-            Q_ = np.zeros(shape)
-            shm = shared_memory.SharedMemory(create=True, size=Q.nbytes)
-            shm_ = shared_memory.SharedMemory(create=True, size=Q_.nbytes)
-            m = min(32,cpu_count())
-            arg_list = [[self,T,K,start,start_,shape,shm.name,shm_.name] for i in range(m)]
-            with Pool(m) as p:
-                p.map(minimax_q_adversary,arg_list)
-            Q = np.copy(np.ndarray(shape, dtype=np.float64, buffer=shm.buf))
-            Q_ = np.copy(np.ndarray(shape, dtype=np.float64, buffer=shm_.buf))
-            shm.close()
-            shm.unlink()
-            shm_.close()
-            shm_.unlink()
-            return Q, Q_
-
-
-def minimax_q_adversary(arg_list):
-    self,T,K,start,start_,shape,shm_name,shm_name_ = arg_list
-    shm = shared_memory.SharedMemory(name=shm_name)
-    Q = np.ndarray(shape, dtype=np.float64, buffer=shm.buf)
-    
-    shm_ = shared_memory.SharedMemory(name=shm_name_)
-    Q_ = np.ndarray(shape, dtype=np.float64, buffer=shm_.buf)
-    
-    n_actions = len(self.mdp.A)
-    actions = list(range(n_actions))
-    
-    for _ in range(K):
-        alpha = 0.01 # np.max((1.0*(1 - 1.5*k/K),0.001))
-        epsilon = 0.01
-        k,q = (self.shape[0]-1,self.oa.q0)
-        s1 = start if start else self.mdp.random_state()
-        s2 = start_ if start_ else self.mdp.random_state()
-
-        label = self.mdp.label[s1]
-        if s1 == s2:
-            label = self.mdp.adversary + label
-        q = self.oa.delta[q][label]  # OA transition
-        acc_type = self.oa.acc[q][label][k]
-        reward = 0
-        gamma = self.discount
-        if acc_type is True:
-            reward = 1-self.discountB
-            gamma = self.discountB
-        elif acc_type is False:
-            gamma = self.discountC
-        max_action = random.randrange(n_actions)
-        max_q = 0
-        for t in range(T):
-
-            if max_q==0 or random.random() < epsilon:
-                max_action = random.randrange(n_actions)
-                max_q = Q[k,q][s1][s2][max_action]
-
-            states, probs = self.transition_probs[s1][max_action]
-            next_s1 = random.choices(states,weights=probs)[0]
-
-            min_q, min_action, max_q_ = 1, 0, 0
-            for action_ in range(n_actions):
-                max_q_ = max(Q_[k,q][next_s1][s2][action_],max_q_)
-                if Q_[k,q][next_s1][s2][action_] < min_q:
-                    min_action = action_
-                    min_q = Q_[k,q][next_s1][s2][action_] 
-
-            Q[k,q][s1][s2][max_action] = min(max_q + alpha * (reward + gamma*min_q - max_q), 1)
-
-            if max_q_==0 or random.random() < epsilon:
-                min_action = random.randrange(n_actions)
-                min_q = Q_[k,q][next_s1][s2][min_action]
-
-            states, probs = self.transition_probs[s2][min_action]
-            next_s2 = random.choices(states,weights=probs)[0]
-
-            label = self.mdp.label[next_s1]
-            if next_s1 == next_s2:
-                label = self.mdp.adversary + label
-            next_q = self.oa.delta[q][label]  # OA transition
+        n_pairs = self.oa.shape[0]
+        init = list(zip(*np.where(self.mdp.structure == 'E')))
+        not_init = set(zip(*np.where(self.mdp.structure != 'E')))
+        dC, dB, d = self.discountC, self.discountB, self.discount
+        tt = 2**16
+        if self.mdp.adversary:
+            suffix = str((T-1).bit_length())+'_'+str((K-1).bit_length())
+            with open('minimax_q_adversary_csrl-'+suffix+'.pkl','wb') as f:
+                pickle.dump(self,f)
             
-            acc_type = self.oa.acc[q][label][k]
-            reward = 0
-            gamma = self.discount
-            if acc_type is True:
-                reward = 1-self.discountB
-                gamma = self.discountB
-            elif acc_type is False:
-                gamma = self.discountC
+            shape = self.oa.shape + self.mdp.shape + self.mdp.shape + (n_actions,)
+            Q,Q_ = np.zeros(shape),np.zeros(shape)
+                
+            for _ in range(K):
+                epsilon = max(0.5-_/tt,0.05)
+                alpha = max(0.5-_/tt,0.05)
+                i = 0 if start else random.randrange(self.oa.shape[0])
+                q = self.oa.q0 if start else random.randrange(self.oa.shape[1]-1)
 
-            max_q, max_action = 0, 0
-            for action in range(n_actions):
-                if Q[k,next_q][next_s1][next_s2][action] > max_q:
-                    max_action = action
-                    max_q = Q[k,next_q][next_s1][next_s2][action]
-
-            Q_[k,q][next_s1][s2][min_action] = min(min_q + alpha * (max_q - min_q), 1)
-
-            q,s1,s2 = next_q, next_s1, next_s2
-
-    
-def minimax_q_robust(arg_list):
-    self,T,K,start,shape,shm_name = arg_list
-    shm = shared_memory.SharedMemory(name=shm_name)
-    Q = np.ndarray(shape, dtype=np.float64, buffer=shm.buf)
-    
-    n_actions = len(self.mdp.A)
-    actions = list(range(n_actions))
-    for k in range(K):
-        state = (self.shape[0]-1,self.oa.q0)+(start if start else self.mdp.random_state())
-        alpha = 0.01 
-        epsilon = 0.01
-        max_action, min_action, max_q = 0, 0, 0
-        for t in range(T):
-
-                # Follow an epsilon-greedy policy
-                if max_q==0 or random.random() < epsilon:
-                    max_action = random.randrange(n_actions)
-                    min_action = random.randrange(n_actions)
-                    max_q = Q[state][max_action][min_action]
-
-                # Observe the next state
-                states, probs = self.transition_probs[state][max_action][min_action]
-                next_state = random.choices(states,weights=probs)[0]
-
-                next_max_action, next_min_action, next_max_q = 0, 0, 0
-                for i in range(n_actions):
-                    action_, min_q = 0, 1
-                    for j in range(n_actions):
-                        if Q[next_state][i][j] < min_q:
-                            action_ = j
-                            min_q = Q[next_state][i][j]
-                    if min_q > next_max_q:
-                        next_max_action = i
-                        next_min_action = action_
-                        next_max_q = min_q
-
-                reward = self.reward[state]
-                gamma = self.discountB if self.reward[state]>0 else (self.discountC if self.reward[state]<0 else self.discount)
-
-                # Q-update
-                Q[state][max_action][min_action] = max_q + alpha * (reward + gamma*next_max_q - max_q)
-
-                state, max_action, min_action, max_q = next_state, next_max_action, next_min_action, next_max_q
-
-def shapley_iteration(args):
-    pr = cProfile.Profile()
-    pr.enable()
-
-    self,states,T,shape,shm_name = args
-    shm = shared_memory.SharedMemory(name=shm_name)
-    value = np.ndarray(shape, dtype=np.float64, buffer=shm.buf)
-    t = 0  # The time step
-    action_values_ = np.empty(len(self.mdp.A))
-#     old_value = np.copy(value)
-    while t < T:
-        for state in states:
-            if not self.mdp.adversary:
-                # Bellman operator
-                action_values = np.empty(len(self.A[state]))
-                action_max = 0
-                for i,action in enumerate(self.A[state]):
-                    action_min = 1
-                    for j,action_ in enumerate(range(len(self.mdp.A))):
-                        val = 0
-                        for s,p in zip(*self.transition_probs[state][action][action_]):
-                            val += value[s]*p
-#                         action_values_[j] = np.sum([value[s]*p for s,p in zip(*self.transition_probs[state][action][action_])])
-                        action_min = min(action_min,val)
-                    action_max= max(action_max,action_min)
-#                     action_values[i] = np.min(action_values_)
-                gamma = self.discountB if self.reward[state]>0 else (self.discountC if self.reward[state]<0 else self.discount)
-                value[state] = self.reward[state] + gamma*action_max  # np.max(action_values)
-
-            else:
-                k,q,r1,c1,r2,c2 = state
-                s1 = r1,c1
-                s2 = r2,c2
+                s1, s2 = random.sample(init,k=2)
 
                 label = self.mdp.label[s1]
                 if s1 == s2:
                     label = self.mdp.adversary + label
-                q_ = self.oa.delta[q][label]  # OA transition
-
-                # Bellman operator
-                action_values = np.zeros(len(self.A[k,q,r1,c1]))
-                for i,action in enumerate(self.A[k,q,r1,c1]):
-                    # for s, p in zip(*self.mdp.get_transition_prob(s1,self.mdp.A[action])):
-                    for s, p in zip(*self.transition_probs[s1][action]):
-                        action_min = 1
-                        for j,action_ in enumerate(range(len(self.mdp.A))):
-                            val=0
-                            for s_,p_ in zip(*self.transition_probs[s2][action_]):
-                                val += value[k,q_][s][s_]*p_
-                            action_min = min(action_min,val)
-                            # action_values_[j] = np.sum([value[k,q_][s][s_]*p_ for s_,p_ in zip(*self.mdp.get_transition_prob(s2,self.mdp.A[action_]))])
-                        action_values[i] += action_min*p
-
-                acc_type = self.oa.acc[q][label][k]
+                acc_type = self.oa.acc[q][label][i]
+                q = self.oa.delta[q][label]  # OA transition
                 reward = 0
-                gamma = self.discount
+                gamma = d
                 if acc_type is True:
-                    reward = 1-self.discountB
-                    gamma = self.discountB
+                    reward = 1-dB
+                    gamma = dB
                 elif acc_type is False:
-                    gamma = self.discountC
+                    gamma = dC
+                max_action = random.randrange(n_actions)
+                max_q = 0
+                next_i = 0
+                for t in range(T):
+                    
+                    if max_q==0 or random.random() < epsilon:
+                        max_action = random.randrange(n_actions)
+                        i = random.randrange(n_pairs)
+                        max_q = Q[i,q][s1][s2][max_action]
 
-                value[state] = reward + gamma*np.max(action_values)
-        t+=1
-#     shm.close()
-    pr.disable()
-    s = io.StringIO()
-    sortby = SortKey.CUMULATIVE
-    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-    ps.print_stats()
-    return s.getvalue()
+                    states, probs = self.transition_probs[s1][max_action]
+                    next_s1 = random.choices(states,weights=probs)[0]
+                   
+                    min_q, min_action, max_q_ = 1, 0, 0
+                    for action_ in range(n_actions):
+                        max_q_ = max(Q_[i,q][next_s1][s2][action_],max_q_)
+                        if Q_[i,q][next_s1][s2][action_] < min_q:
+                            min_action = action_
+                            min_q = Q_[i,q][next_s1][s2][action_] 
+
+                    Q[i,q][s1][s2][max_action] = max_q + alpha * (reward + gamma*min_q - max_q)
+
+                    if max_q_==0 or random.random() < epsilon:
+                        min_action = random.randrange(n_actions)
+                        min_q = Q_[i,q][next_s1][s2][min_action]
+
+                    states, probs = self.transition_probs[s2][min_action]
+                    next_s2 = random.choices(states,weights=probs)[0]
+
+                    label = self.mdp.label[next_s1]
+                    if next_s1 == next_s2:
+                        label = self.mdp.adversary + label
+                    next_q = self.oa.delta[q][label]  # OA transition
+
+                    acc_type = self.oa.acc[q][label][next_i]
+                    reward = 0
+                    gamma = d
+                    if acc_type is True:
+                        reward = 1-dB
+                        gamma = dB
+                    elif acc_type is False:
+                        gamma = dC
+                    
+                    max_q, max_action = 0, 0
+                    next_i = i
+                    if _>tt:
+                        for i_ in range(n_pairs):
+                            g = 1 if i==i_ else min(2*_/K,dC)   
+                            for action in range(n_actions):
+                                if g*Q[next_i,next_q][next_s1][next_s2][action] > max_q:
+                                    next_i = i_
+                                    max_action = action
+                                    max_q = g*Q[next_i,next_q][next_s1][next_s2][action]
+                    else:
+                        for action in range(n_actions):
+                            if Q[i,next_q][next_s1][next_s2][action] > max_q:
+                                max_action = action
+                                max_q = Q[i,next_q][next_s1][next_s2][action]
+
+
+
+                    Q_[i,q][next_s1][s2][min_action] = min_q + alpha * (max_q - min_q)
+
+                    q,s1,s2,i = next_q, next_s1, next_s2, next_i
+                    
+                    if s1 in not_init:
+                        break
+                        
+                if _>=2*tt and _.bit_length() != (_-1).bit_length():
+                    suffix = str((T-1).bit_length())+'_'+str((_-1).bit_length())
+                    np.save('minimax_q_adversary_Q-Q_-'+suffix,(Q,Q_))
+
+            return Q, Q_
+        
+        
+        else:
+            suffix = str((T-1).bit_length())+'_'+str((K-1).bit_length())
+            with open('minimax_q_robust_csrl-'+suffix+'.pkl','wb') as f:
+                pickle.dump(self,f)
+            
+            shape = self.oa.shape+self.mdp.shape+(n_actions,n_actions)
+            Q = np.zeros(shape)
+            
+            discount = np.copy(self.reward)
+            for state in self.states(second=False):
+                discount[state] = dB if self.reward[state]>0 else (dC if self.reward[state]<0 else d)
+                
+            for _ in range(K):
+                epsilon = max(0.5-_/tt,0.05)
+                alpha = max(0.5-_/tt,0.05)
+                
+                i = 0 if start else random.randrange(n_pairs)
+                q = self.oa.q0 if start else random.randrange(self.oa.shape[1]-1)
+                state = (i,q)+(start if start else random.choice(init))
+                
+                next_i = 0
+                max_action, min_action, max_q = 0, 0, 0
+                for t in range(T):
+                    # Follow an epsilon-greedy policy
+                    if max_q==0 or random.random() < epsilon:
+                        max_action = random.randrange(n_actions)
+                        min_action = random.randrange(n_actions)
+                        state = (random.randrange(n_pairs),) + state[1:]
+                        max_q = Q[state][max_action][min_action]
+                
+                    # Observe the next state
+                    states, probs = self.transition_probs[state][max_action][min_action]
+                    next_state = random.choices(states,weights=probs)[0]
+
+                    next_max_action, next_min_action, next_max_q = 0, 0, 0
+                    next_i = state[0]
+                    if _>tt:
+                        for i in range(n_pairs):
+                            g = 1 if next_state[0]==i else min(2*_/K,dC)
+                            s = (i,) + next_state[1:]
+                            for j in range(n_actions):
+                                action_, min_q = 0, 1
+                                for k in range(n_actions):
+                                    if g*Q[s][j][k] < min_q:
+                                        action_ = k
+                                        min_q = g*Q[s][j][k]
+                                if min_q > next_max_q:
+                                    next_i = i
+                                    next_max_action = j
+                                    next_min_action = action_
+                                    next_max_q = min_q
+                    else:
+                        for j in range(n_actions):
+                            action_, min_q = 0, 1
+                            for k in range(n_actions):
+                                if Q[next_state][j][k] < min_q:
+                                    action_ = k
+                                    min_q = Q[next_state][j][k]
+                            if min_q > next_max_q:
+                                next_max_action = j
+                                next_min_action = action_
+                                next_max_q = min_q
+
+                    reward = self.reward[state]
+                    gamma = discount[state]
+                    
+                    # Q-update
+                    Q[state][max_action][min_action] = max_q + alpha * (reward + gamma*next_max_q - max_q)
+
+                    state, max_action, min_action, max_q = (next_i,)+next_state[1:], next_max_action, next_min_action, next_max_q
+                    
+#                     if (state[2],state[3]) in not_init:
+#                         break
+                        
+                if _>=2*tt and _.bit_length() != (_-1).bit_length():
+                    suffix = str((T-1).bit_length())+'_'+str((_-1).bit_length())
+                    np.save('minimax_q_robust_Q-'+suffix,Q)
+                
+            return Q

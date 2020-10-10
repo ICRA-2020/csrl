@@ -368,7 +368,7 @@ class GridMDP():
             # Draw the arrows to visualize the policy
             elif value[i,j] > 0 or value is self.reward:
                 if policy[i,j] >= len(self.A):
-                    plt.text(j, i-0.05,r'$\epsilon_'+str(policy[i,j]-len(self.A))+'$', horizontalalignment='center',color=color,fontsize=fontsize+5)
+                    plt.text(j, i-0.05,r'$\varepsilon_'+str(policy[i,j]-len(self.A)+1)+'$', horizontalalignment='center',color=color,fontsize=fontsize+5)
                 else:
                     action_name = self.A[policy[i,j]]
                     pos = j,i
@@ -433,6 +433,8 @@ class GridMDP():
         if agent_:
             circle_=plt.Circle((agent_[1],agent_[0]-0.17),0.26,color='lightpink',ec='deeppink',lw=2)
             ax.add_artist(circle_)
+            if self.adversary:
+                plt.text(agent_[1]+0.01,agent_[0]-0.09,'$'+','.join(self.adversary)+'$',horizontalalignment='center',color=color,fontproperties=f,fontname=fontname,fontsize=fontsize+5)
 
         if save:
             plt.savefig(save,bbox_inches='tight')

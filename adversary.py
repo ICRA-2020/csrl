@@ -1,79 +1,59 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
-
 from csrl.mdp import GridMDP
 from csrl.oa import OmegaAutomaton
 from csrl import ControlSynthesis
 import numpy as np
 
-from multiprocessing import cpu_count
+import sys
 
-T = 2**10
-K = 2**15
-print(T,K,min(32,cpu_count()))
+method = sys.argv[1]
+T = 2**int(sys.argv[2])
+K = 2**int(sys.argv[3])
+suffix = sys.argv[2]+'-'+sys.argv[3]
+print('robust-'+suffix)
 
 # Specification
-ltl = 'F G a & G !b'
+ltl = 'G F b & G F c & (F G d | F G e) & G !a'
 oa = OmegaAutomaton(ltl,oa_type='dra')
 print('Number of Omega-automaton states (including the trap state):',oa.shape[1])
+print('Number of accepting pairs:',oa.shape[0])
 
 # MDP Description
 shape = (5,5)
 # E: Empty, T: Trap, B: Obstacle
 structure = np.array([
-    ['E',  'E',  'T',  'E',  'E'],
+    ['E',  'E',  'B',  'E',  'E'],
+    ['T',  'E',  'T',  'E',  'T'],
+    ['B',  'E',  'B',  'E',  'B'],
     ['E',  'E',  'E',  'E',  'E'],
-    ['T',  'B',  'T',  'E',  'E'],
-    ['E',  'E',  'E',  'E',  'E'],
-    ['E',  'E',  'T',  'E',  'E']
+    ['E',  'E',  'E',  'E',  'E']
 ])
 
 label = np.array([
-    [(),        (),        (),        ('a',),        ('a',)],
-    [(),        (),        (),        ('a',),        ('a',)],
-    [('a',),    (),        (),        ('a',),        ('a',)],
-    [(),        (),        (),        ('a',),        ('a',)],
-    [(),        (),        (),        ('a',),        ('a',)],
+    [('b','d'),('c','d'),(),('c','d'),('b','d')],
+    [(),       (),       (),       (),       ()],
+    [(),       (),       (),       (),       ()],
+    [('c','e'),(),       (),       (),('c','e')],
+    [('b','e'),(),       (),       (),('b','e')]
 ],dtype=np.object)
 
 reward = np.zeros(shape)
+lcmap={
+    'b':'peachpuff',
+    'c':'plum',
+    'd':'greenyellow',
+    'e':'palegreen'
+}
 
-grid_mdp = GridMDP(shape=shape,structure=structure,reward=reward,label=label,figsize=6,second_agent=('b',))  # Use figsize=4 for smaller figures
+grid_mdp = GridMDP(shape=shape,structure=structure,reward=reward,label=label,figsize=5,adversary=('a',),lcmap=lcmap,p=0.6)  # Use figsize=4 for smaller figures
+grid_mdp.plot()
 
 # Construct the product MDP
 csrl = ControlSynthesis(grid_mdp,oa)
 
-
-# In[2]:
-
-
-print(oa.__dict__)
-
-
-# In[3]:
-
-
-Q,Q_=csrl.minimax_q(T=T,K=K,start=(0,4),start_=(4,0))
-
-
-# In[4]:
-
-
-# policy = np.argmax(Q,axis=-1)
-# policy_ = np.argmin(Q_,axis=-1)
-# value = np.max(Q,axis=-1)
-
-
-# In[5]:
-
-
-# episode=csrl.simulate(policy,policy_,start=(0,4),start_=(4,0),T=1000,plot=False)
-
-
-# In[6]:
-
-
-np.save('Q,Q_-'+str((T-1).bit_length())+'-'+str((K-1).bit_length())+'-'+str(min(32,cpu_count())),(Q,Q_))
-
+if method == 'shapley':
+    csrl.shapley(T=T)
+elif method =='minimax_q':
+    csrl.minimax_q(T=T,K=K)
