@@ -70,6 +70,7 @@ The repository contains a couple of example IPython notebooks:
  - [LTL to Omega-Automata Translation](Examples%20of%20LTL%20to%20Omega-Automata%20Translation.ipynb)
  - [MDPs](Examples%20of%20MDPs.ipynb)
  - [Safe Absorbing States](Safe%20Absorbing%20States.ipynb)
- - [Nursery Scenario](Nursery%20Scenario.ipynb)
+ - [Robust Controller](Robust%20Controller.ipynb)
+ - [Adversary](Adversary.ipynb)
 
 Animations of the case studies: [safe_absorbing.mp4](safe_absorbing.mp4) and [nursery.mp4](nursery.mp4).
